@@ -1,1 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Rendiciones y Pérdidas</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h2, h3 { color: #222; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select, button { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: #007BFF; color: white; border: none; font-size: 16px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .card { background: #fff; border: 1px solid #ddd; padding: 15px; margin-top: 10px; border-radius: 5px; }
+        .danger { color: #dc3545; font-weight: bold; }
+        .success { color: #28a745; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Nueva Rendición</h2>
+    
+    <div class="form-group">
+        <label for="concepto">Concepto / Descripción:</label>
+        <input type="text" id="concepto" placeholder="Ej: Nafta, Almuerzo cliente">
+    </div>
+    
+    <div class="form-group">
+        <label for="importe">Importe Rendido ($):</label>
+        <input type="number" id="importe" placeholder="0.00">
+    </div>
+
+    <div class="form-group">
+        <label for="diasPago">Días para el Pago de la Empresa:</label>
+        <input type="number" id="diasPago" value="7" placeholder="Ej: 7 o 32">
+    </div>
+
+    <div class="form-group">
+        <label for="inflacion">Inflación Mensual Estimada (%):</label>
+        <input type="number" id="inflacion" value="4.0" step="0.1">
+    </div>
+
+    <div class="form-group">
+        <label for="tipoUso">¿Cómo vas a usar el dinero acreditado?</label>
+        <select id="tipoUso">
+            <option value="efectivo">Efectivo (Cajero - $40k límite/día, 0% recargo)</option>
+            <option value="transferencia">Transferencia Bancaria (+6% recargo)</option>
+            <option value="tarjeta">Pago con Tarjeta de Crédito (+10% recargo)</option>
+        </select>
+    </div>
+
+    <button onclick="calcularYGuardar()">Calcular y Registrar Gasto</button>
+
+    <h3>Historial de Rendiciones</h3>
+    <div id="historial"></div>
+</div>
+
+<script>
+    let rendiciones = JSON.parse(localStorage.getItem('rendiciones')) || [];
+
+    function calcularYGuardar() {
+        const concepto = document.getElementById('concepto').value;
+        const importe = parseFloat(document.getElementById('importe').value);
+        const diasPago = parseInt(document.getElementById('diasPago').value);
+        const inflacionMensual = parseFloat(document.getElementById('inflacion').value) / 100;
+        const tipoUso = document.getElementById('tipoUso').value;
+
+        if (!concepto || isNaN(importe) || isNaN(diasPago)) {
+            alert("Por favor, completa todos los campos correctamente.");
+            return;
+        }
+
+        // 1. Cálculo de pérdida por inflación
+        const tasaDiaria = Math.pow(1 + inflacionMensual, 1 / 30) - 1;
+        const perdidaInflacion = importe * (1 - Math.pow(1 + tasaDiaria, -diasPago));
+
+        // 2. Cálculo de pérdida por método de disposición/recargo
+        let recargoPorcentaje = 0;
+        let diasAdicionalesCajero = 0;
+
+        if (tipoUso === 'tarjeta') {
+            recargoPorcentaje = 0.10;
+        } else if (tipoUso === 'transferencia') {
+            recargoPorcentaje = 0.06;
+        } else if (tipoUso === 'efectivo') {
+            // Si supera los 40,000, necesitas más de un día de cajero
+            const extraccionesNecesarias = Math.ceil(importe / 40000);
+            if (extraccionesNecesarias > 1) {
+                diasAdicionalesCajero = extraccionesNecesarias - 1;
+            }
+        }
+
+        const perdidaRecargo = importe * recargoPorcentaje;
+        
+        // Si hubo días extra por extracción de cajero, se recalcula la inflación para esos días extra
+        const perdidaInflacionExtra = tipoUso === 'efectivo' ? importe * (1 - Math.pow(1 + tasaDiaria, -diasAdicionalesCajero)) : 0;
+
+        const perdidaTotal = perdidaInflacion + perdidaRecargo + perdidaInflacionExtra;
+        const recuperoReal = importe - perdidaTotal;
+
+        const nuevaRendicion = {
+            concepto,
+            importe,
+            diasPago: diasPago + diasAdicionalesCajero,
+            tipoUso,
+            perdidaInflacion: perdidaInflacion + perdidaInflacionExtra,
+            perdidaRecargo,
+            perdidaTotal,
+            recuperoReal,
+            fecha: new Date().toLocaleDateString()
+        };
+
+        rendiciones.push(nuevaRendicion);
+        localStorage.setItem('rendiciones', JSON.stringify(rendiciones));
+        renderizarHistorial();
+        
+        // Limpiar formulario básico
+        document.getElementById('concepto').value = '';
+        document.getElementById('importe').value = '';
+    }
+
+    function renderizarHistorial() {
+        const contenedor = document.getElementById('historial');
+        contenedor.innerHTML = '';
+
+        if (rendiciones.length === 0) {
+            contenedor.innerHTML = '<p>No hay rendiciones cargadas aún.</p>';
+            return;
+        }
+
+        rendiciones.forEach((r, index) => {
+            contenedor.innerHTML += `
+                <div class="card">
+                    <strong>${r.concepto}</strong> <small>(${r.fecha})</small><br>
+                    Monto Rendido: $${r.importe.toFixed(2)}<br>
+                    Uso pactado: ${r.tipoUso.toUpperCase()}<br>
+                    Tiempo de espera total: ${r.diasPago} días<br>
+                    <span class="danger">Pérdida Inflación: -$${r.perdidaInflacion.toFixed(2)}</span><br>
+                    <span class="danger">Pérdida por Recargo: -$${r.perdidaRecargo.toFixed(2)}</span><br>
+                    <hr>
+                    <span class="danger">Pérdida Total: -$${r.perdidaTotal.toFixed(2)}</span><br>
+                    <span class="success">Poder de compra Neto recuperado: $${r.recuperoReal.toFixed(2)}</span>
+                </div>
+            `;
+        });
+    }
+
+    // Cargar historial al iniciar
+    renderizarHistorial();
+</script>
+
+</body>
+</html>
 
